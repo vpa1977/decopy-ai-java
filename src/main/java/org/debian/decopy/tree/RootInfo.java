@@ -185,7 +185,7 @@ public final class RootInfo extends DirInfo {
 
     public void process(Options options) {
         int workers = options.jobs > 0 ? options.jobs :
-                Runtime.getRuntime().availableProcessors();
+                8;
 
         ExecutorService executor = Executors.newFixedThreadPool(workers);
         Set<Future<FileInfo>> tasks = new HashSet<>();
@@ -223,34 +223,45 @@ public final class RootInfo extends DirInfo {
 
                 processed++;
                 if (options.progress && total > 0 && processed % 100 == 0) {
-                    printProgress("Queuing", processed, total);
+                    printProgress("Processing", processed, total);
+                    for (Future<FileInfo> t : tasks) {
+                        try {
+                            t.get();
+                        } catch (ExecutionException e) {
+                            LOG.warning("Error processing file: " + e.getCause().getMessage());
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    tasks.clear();
                 }
             }
 
             // Process directories with license files
+            total = dirsWithLicenses.size();
+            processed = 0;
             for (DirInfo dirInfo : dirsWithLicenses) {
                 Future<FileInfo> task = executor.submit(() -> {
                     dirInfo.processLicensesFromTasks();
                     return dirInfo;
                 });
                 tasks.add(task);
+                processed++;
+                if (options.progress && processed % 100 == 0) {
+                    printProgress("Processing dir", processed, total);
+                    for (Future<FileInfo> t : tasks) {
+                        try {
+                            t.get();
+                        } catch (ExecutionException e) {
+                            LOG.warning("Error processing file: " + e.getCause().getMessage());
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    tasks.clear();
+                }
             }
 
-            // Wait for all tasks
-            int done = 0;
-            for (Future<FileInfo> task : tasks) {
-                try {
-                    task.get();
-                } catch (ExecutionException e) {
-                    LOG.warning("Error processing file: " + e.getCause().getMessage());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                done++;
-                if (options.progress && tasks.size() > 0 && done % 100 == 0) {
-                    printProgress("Processing", done, tasks.size());
-                }
-            }
 
         } finally {
             executor.shutdown();
